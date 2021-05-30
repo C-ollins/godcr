@@ -13,6 +13,7 @@ import (
 	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
+	"github.com/planetdecred/dcrlibwallet"
 	"github.com/planetdecred/godcr/ui/decredmaterial"
 	"github.com/planetdecred/godcr/ui/values"
 	qrcode "github.com/yeqown/go-qrcode"
@@ -31,6 +32,7 @@ type receivePage struct {
 	info, more        decredmaterial.IconButton
 	card              decredmaterial.Card
 	receiveAddress    decredmaterial.Label
+	selector          *accountSelector
 	gtx               *layout.Context
 
 	backdrop *widget.Clickable
@@ -75,6 +77,18 @@ func ReceivePage(common pageCommon) Page {
 	page.newAddr.Background = common.theme.Color.Surface
 	page.newAddr.TextSize = values.TextSize16
 
+	page.selector = newAccountSelector(common).
+		title("Receiving account").
+		accountSelected(func(selectedAccount *dcrlibwallet.Account) {
+			selectedWallet := page.common.multiWallet.WalletWithID(selectedAccount.WalletID)
+			currentAddress, err := selectedWallet.CurrentAddress(selectedAccount.Number)
+			if err != nil {
+				log.Errorf("Error getting current address: %v", err)
+			} else {
+				page.currentAddress = currentAddress
+			}
+		})
+
 	return page
 }
 
@@ -92,7 +106,7 @@ func (pg *receivePage) Layout(gtx layout.Context) layout.Dimensions {
 	pageContent := []func(gtx C) D{
 		func(gtx C) D {
 			return pg.pageSections(gtx, func(gtx C) D {
-				return common.accountSelectorLayout(gtx, "receive", false)
+				return pg.selector.Layout(gtx)
 			})
 		},
 		func(gtx C) D {
@@ -111,10 +125,7 @@ func (pg *receivePage) Layout(gtx layout.Context) layout.Dimensions {
 								Alignment: layout.Middle,
 							}.Layout(gtx,
 								layout.Rigid(func(gtx C) D {
-									if pg.currentAddress != "" {
-										return pg.addressLayout(gtx, common)
-									}
-									return layout.Dimensions{}
+									return pg.addressLayout(gtx, common)
 								}),
 								layout.Rigid(func(gtx C) D {
 									return pg.addressQRCodeLayout(gtx, common)
@@ -275,6 +286,9 @@ func (pg *receivePage) addressQRCodeLayout(gtx layout.Context, common pageCommon
 }
 
 func (pg *receivePage) handle() {
+
+	pg.selector.handle()
+
 	common := pg.common
 	gtx := pg.gtx
 	if pg.backdrop.Clicked() {
@@ -311,8 +325,7 @@ func (pg *receivePage) handle() {
 	}
 
 	if common.subPageBackButton.Button.Clicked() {
-		// TODO
-		// common.changePage(*common.returnPage)
+		common.popPage()
 	}
 
 	if pg.copy.Button.Clicked() {
@@ -330,12 +343,11 @@ func (pg *receivePage) handle() {
 }
 
 func (pg *receivePage) generateNewAddress() (string, error) {
-	selectedWallet := pg.common.wallet.WalletWithID(pg.common.wallAcctSelector.selectedReceiveWallet)
+	selectedWallet := pg.common.wallet.WalletWithID(pg.selector.selectedAccount.WalletID)
 
 generateAddress:
-	newAddr, err := selectedWallet.NextAddress(int32(pg.common.wallAcctSelector.selectedReceiveAccount))
+	newAddr, err := selectedWallet.NextAddress(pg.selector.selectedAccount.Number)
 	if err != nil {
-		log.Debug("Error generating new address" + err.Error())
 		return "", err
 	}
 
